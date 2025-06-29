@@ -1,41 +1,43 @@
 {
-  "private": true,
-  "displayName": "Plugin Name",
-  "name": "homebridge-plugin-name",
-  "version": "1.0.0",
-  "description": "A short description about what your plugin does.",
-  "license": "Apache-2.0",
+  "displayName": "Homebridge Intex Plus",
+  "name": "homebridge-intex-plus",
+  "version": "0.1.0",
+  "description": "The best way to control your Intex PureSpa pool.",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/USERNAME/GITHUB_PROJECT_NAME.git"
+    "url": "git+https://github.com/adrianjagielak/homebridge-intex-plus.git"
   },
   "bugs": {
-    "url": "https://github.com/USERNAME/GITHUB_PROJECT_NAME/issues"
+    "url": "https://github.com/adrianjagielak/homebridge-intex-plus/issues"
   },
   "engines": {
-    "node": "^18.17.0 || ^20.9.0",
-    "homebridge": "^1.8.0"
+    "node": "^18.20.4 || ^20.16.0 || ^22.6.0",
+    "homebridge": "^1.8.0 || ^2.0.0-beta.0"
   },
   "main": "dist/index.js",
   "scripts": {
-    "lint": "eslint src/**/*.ts --max-warnings=0",
-    "watch": "npm run build && npm link && nodemon",
     "build": "rimraf ./dist && tsc",
-    "prepublishOnly": "npm run lint && npm run build"
+    "lint": "eslint . --max-warnings=0",
+    "prepublishOnly": "npm run build",
+    "watch": "npm run build && npm link && nodemon"
   },
   "keywords": [
     "homebridge-plugin"
   ],
   "devDependencies": {
-    "@types/node": "^20.12.13",
-    "@typescript-eslint/eslint-plugin": "^7.11.0",
-    "@typescript-eslint/parser": "^7.11.0",
-    "eslint": "^8.57.0",
-    "homebridge": "^1.8.2",
-    "nodemon": "^3.1.2",
-    "rimraf": "^5.0.7",
+    "@eslint/js": "^9.9.0",
+    "@types/eslint__js": "^8.42.3",
+    "@types/node": "^22.2.0",
+    "eslint": "^9.9.0",
+    "homebridge": "^2.0.0-beta.0",
+    "nodemon": "^3.1.4",
+    "rimraf": "^6.0.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.4.5"
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.0.1"
+  },
+  "dependencies": {
+    "axios": "^1.7.2"
   }
 }

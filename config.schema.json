@@ -1,5 +1,5 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "IntexPlusPlatform",
   "pluginType": "platform",
   "singular": true,
   "schema": {
@@ -9,8 +9,19 @@
         "title": "Name",
         "type": "string",
         "required": true,
-        "default": "Example Dynamic Platform"
-      }
+        "default": "Intex"
+      },
+      "ips": {
+        "title": "Comma-separated list of SPA IPs (min. 1)",
+        "type": "string",
+        "required": true,
+        "placeholder": "e.g. 192.168.1.123,192.168.1.124"
+      },
+      "showUnusedSwitches": {
+        "title": "Show unused switches",
+        "type": "boolean",
+        "default": false
+      },
     }
   }
 }

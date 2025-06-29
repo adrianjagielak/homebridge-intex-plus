@@ -121,3 +121,8 @@ dist
 
 # Webstorm
 .idea
+
+
+
+
+.DS_Store
