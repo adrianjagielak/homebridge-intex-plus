@@ -21,7 +21,7 @@
         "title": "Show unused switches",
         "type": "boolean",
         "default": false
-      },
+      }
     }
   }
 }
