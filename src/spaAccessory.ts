@@ -29,6 +29,7 @@ interface DeviceState {
 
 export class SpaAccessory {
   private client?: net.Socket;
+  private reconnectTimer?: NodeJS.Timeout;
   private messageQueue: Map<string, { resolve: (value: Message) => void; reject: (reason?: Error) => void; timeout: NodeJS.Timeout }>;
   private isOnline = false;
   private deviceState?: DeviceState;
@@ -127,16 +128,39 @@ export class SpaAccessory {
   }
 
   private connect() {
-    this.client = new net.Socket();
+    this.teardownSocket();
 
-    this.client.connect(8990, this.host, () => {
+    const client = new net.Socket();
+    this.client = client;
+
+    client.on('data', this.onData.bind(this));
+    client.on('error', this.onError.bind(this));
+    client.on('close', this.onClose.bind(this));
+
+    client.connect(8990, this.host, () => {
       this.platform.log.debug('Connected to the spa');
       this.isOnline = true;
     });
+  }
 
-    this.client.on('data', this.onData.bind(this));
-    this.client.on('error', this.onError.bind(this));
-    this.client.on('close', this.onClose.bind(this));
+  private teardownSocket() {
+    if (this.client) {
+      this.client.removeAllListeners();
+      this.client.destroy();
+      this.client = undefined;
+    }
+  }
+
+  private scheduleReconnect() {
+    this.isOnline = false;
+    this.teardownSocket();
+    if (this.reconnectTimer) {
+      return;
+    }
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.connect();
+    }, 5000);
   }
 
   private startSendingRefreshCommand() {
@@ -185,14 +209,12 @@ export class SpaAccessory {
 
   private onError(err: Error) {
     this.platform.log.warn('Socket error:', err.message, '. Attempting to reconnect in 5000 ms');
-    this.isOnline = false;
-    setTimeout(() => this.connect(), 5000);
+    this.scheduleReconnect();
   }
 
   private onClose() {
     this.platform.log.warn('Connection closed, attempting to reconnect in 5000 ms');
-    this.isOnline = false;
-    setTimeout(() => this.connect(), 5000);
+    this.scheduleReconnect();
   }
 
   private async postMessage(message: { type: number; data: string }): Promise<Message> {
