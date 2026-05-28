@@ -22,7 +22,8 @@ interface DeviceState {
   isWaterJetOn: boolean;
   isSanitizerOn: boolean;
   isControllerOn: boolean;
-  currentTemperature: number;
+  // Undefined when the spa unit is powered off but the controller is still reachable.
+  currentTemperature?: number;
   targetTemperature: number;
   temperatureUnit: 'Celsius' | 'Fahrenheit';
 }
@@ -78,9 +79,6 @@ export class SpaAccessory {
 
     // TODO:?
     // this.thermostatServiceIInne.setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Filter');
-    
-    // TODO: 190 is an error
-
 
     this.filterService = this.accessory.getServiceById(this.platform.Service.Switch, 'Filter') ||
       this.accessory.addService(new this.platform.Service.Switch('Filter', 'Filter'));
@@ -255,7 +253,11 @@ export class SpaAccessory {
     const isWaterJetOn = (buffer.readUInt8(0x05) & 0x08) === 0x08;
     const isSanitizerOn = (buffer.readUInt8(0x05) & 0x20) === 0x20;
     const isControllerOn = (buffer.readUInt8(0x05) & 0x01) === 0x01;
-    const currentTemperature = buffer.readUInt8(0x07);
+    const rawCurrentTemperature = buffer.readUInt8(0x07);
+    // When the spa unit is powered off but the controller is still reachable,
+    // the current temperature byte reads as a sentinel (e.g. 190) that is well
+    // above any plausible water temperature in either Celsius or Fahrenheit.
+    const currentTemperature = rawCurrentTemperature >= 110 ? undefined : rawCurrentTemperature;
     let targetTemperature = buffer.readUInt8(0x0f);
 
     let temperatureUnit: 'Celsius' | 'Fahrenheit';
@@ -320,7 +322,9 @@ export class SpaAccessory {
         maxValue: this.deviceState.temperatureUnit === 'Celsius' ? 40 : 104,
         minStep: 1,
       });
-    this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.deviceState.currentTemperature);
+    if (this.deviceState.currentTemperature !== undefined) {
+      this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.deviceState.currentTemperature);
+    }
     this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetTemperature, this.deviceState.targetTemperature);
   }
 
@@ -387,7 +391,7 @@ export class SpaAccessory {
     if (!this.isOnline) {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
-    if (!this.deviceState) {
+    if (!this.deviceState || this.deviceState.currentTemperature === undefined) {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.RESOURCE_BUSY);
     }
 
