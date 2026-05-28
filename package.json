@@ -1,7 +1,7 @@
 {
   "displayName": "Homebridge Intex Plus",
   "name": "homebridge-intex-plus",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "The best way to control your Intex PureSpa pool.",
   "type": "module",
   "repository": {
