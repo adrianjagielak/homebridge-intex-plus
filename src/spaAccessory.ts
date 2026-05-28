@@ -19,9 +19,12 @@ interface Message {
 // The controller reports them through the current-temperature byte (see
 // parseDeviceState), so we map them to human-readable causes for the logs.
 const ERROR_CODE_MEANINGS: { [code: string]: string } = {
+  E81: 'no transmission signal',
   E90: 'no water flow (check filter, pump and inlet/outlet connections)',
+  E91: 'alarm: low salt level',
+  E92: 'alarm: high salt level',
   E94: 'water temperature too low',
-  E95: 'water temperature too high (around 50°C / 122°F)',
+  E95: 'water temperature too high',
   E96: 'system error',
   E97: 'no-water protection triggered',
   E99: 'water temperature sensor damaged',
