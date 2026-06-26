@@ -15,6 +15,21 @@ interface Message {
   result?: string;
 }
 
+// Error codes shown on the spa's LED panel, as documented in the user manual.
+// The controller reports them through the current-temperature byte (see
+// parseDeviceState), so we map them to human-readable causes for the logs.
+const ERROR_CODE_MEANINGS: { [code: string]: string } = {
+  E81: 'no transmission signal',
+  E90: 'no water flow (check filter, pump and inlet/outlet connections)',
+  E91: 'alarm: low salt level',
+  E92: 'alarm: high salt level',
+  E94: 'water temperature too low',
+  E95: 'water temperature too high',
+  E96: 'system error',
+  E97: 'no-water protection triggered',
+  E99: 'water temperature sensor damaged',
+};
+
 interface DeviceState {
   isBubblesOn: boolean;
   isFilterOn: boolean;
@@ -22,10 +37,14 @@ interface DeviceState {
   isWaterJetOn: boolean;
   isSanitizerOn: boolean;
   isControllerOn: boolean;
-  // Undefined when the spa unit is powered off but the controller is still reachable.
+  // Undefined when the current-temperature byte does not carry a real water
+  // temperature (e.g. the spa is reporting an error code, see errorCode).
   currentTemperature?: number;
   targetTemperature: number;
   temperatureUnit: 'Celsius' | 'Fahrenheit';
+  // The error code currently shown on the spa's LED panel (e.g. 'E90'), or
+  // undefined when there is no fault.
+  errorCode?: string;
 }
 
 export class SpaAccessory {
@@ -36,7 +55,7 @@ export class SpaAccessory {
   private deviceState?: DeviceState;
   // Last temperature reading we consider usable. Cached across reconnects and, via
   // accessory.context, across Homebridge restarts, so we can keep reporting a
-  // plausible CurrentTemperature while the spa unit is powered off.
+  // plausible CurrentTemperature while the spa is reporting a fault.
   private lastKnownCurrentTemperature?: number;
 
   private thermostatService: Service;
@@ -108,8 +127,8 @@ export class SpaAccessory {
 
     // A Battery service is the canonical, warning-free way to raise a generic alert
     // on the accessory tile in the Home app. We repurpose its low-battery indicator
-    // to flag that the spa unit is powered off (no live temperature) while the
-    // controller itself is still reachable.
+    // to flag that the spa is reporting a fault (an error code on its LED panel)
+    // while the controller itself is still reachable.
     this.batteryService = this.accessory.getService(this.platform.Service.Battery) ||
       this.accessory.addService(this.platform.Service.Battery);
     this.batteryService.getCharacteristic(this.platform.Characteristic.StatusLowBattery)
@@ -271,9 +290,13 @@ export class SpaAccessory {
     const isSanitizerOn = (buffer.readUInt8(0x05) & 0x20) === 0x20;
     const isControllerOn = (buffer.readUInt8(0x05) & 0x01) === 0x01;
     const rawCurrentTemperature = buffer.readUInt8(0x07);
-    // When the spa unit is powered off but the controller is still reachable,
-    // the current temperature byte reads as a sentinel (e.g. 190) that is well
-    // above any plausible water temperature in either Celsius or Fahrenheit.
+    // The current-temperature byte doubles as an error indicator: when the spa
+    // is in a fault state it reports the error code shown on the LED panel
+    // offset by +100 (e.g. 190 => E90 "no water flow"). The documented error
+    // codes start at E81, so any value >= 181 is a fault rather than a reading.
+    const errorCode = rawCurrentTemperature >= 181 ? `E${rawCurrentTemperature - 100}` : undefined;
+    // Valid water temperatures never exceed 104°F, so anything higher (error
+    // codes or other out-of-range readings) is not a real temperature.
     const currentTemperature = rawCurrentTemperature >= 110 ? undefined : rawCurrentTemperature;
     let targetTemperature = buffer.readUInt8(0x0f);
 
@@ -293,6 +316,8 @@ export class SpaAccessory {
     // const previousIsOnline = this.isOnline;
     this.isOnline = true;
 
+    const previousErrorCode = this.deviceState?.errorCode;
+
     this.deviceState = {
       isBubblesOn,
       isFilterOn,
@@ -303,10 +328,21 @@ export class SpaAccessory {
       currentTemperature,
       targetTemperature,
       temperatureUnit,
+      errorCode,
     };
 
+    // Log fault transitions only, so a persistent error does not spam the log.
+    if (errorCode !== previousErrorCode) {
+      if (errorCode) {
+        const meaning = ERROR_CODE_MEANINGS[errorCode];
+        this.platform.log.warn(`Spa is reporting error ${errorCode}${meaning ? `: ${meaning}` : ''}`);
+      } else {
+        this.platform.log.info(`Spa error ${previousErrorCode} cleared`);
+      }
+    }
+
     // Cache the latest usable reading (and persist it across restarts) so we can keep
-    // reporting it once the spa unit powers off and stops sending a real value.
+    // reporting it once the spa reports a fault and stops sending a real value.
     if (currentTemperature !== undefined && currentTemperature !== this.lastKnownCurrentTemperature) {
       this.lastKnownCurrentTemperature = currentTemperature;
       this.accessory.context.lastKnownCurrentTemperature = currentTemperature;
@@ -352,10 +388,10 @@ export class SpaAccessory {
     if (this.lastKnownCurrentTemperature !== undefined) {
       this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.lastKnownCurrentTemperature);
     }
-    // Flag a powered-off spa unit (no live temperature) as a low-battery alert.
+    // Flag an active spa fault (an error code on the LED panel) as a low-battery alert.
     this.batteryService.updateCharacteristic(
       this.platform.Characteristic.StatusLowBattery,
-      this.deviceState.currentTemperature === undefined ?
+      this.deviceState.errorCode !== undefined ?
         this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
         this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
     );
@@ -442,8 +478,8 @@ export class SpaAccessory {
   async getStatusLowBattery(): Promise<CharacteristicValue> {
     // Never throw here: an error thrown from a characteristic getter is exactly what
     // makes an accessory show as "No Response". Default to "normal" until a device
-    // state tells us the live temperature is unavailable (spa unit powered off).
-    const isFault = this.deviceState !== undefined && this.deviceState.currentTemperature === undefined;
+    // state tells us the spa is reporting a fault (an error code on its LED panel).
+    const isFault = this.deviceState?.errorCode !== undefined;
 
     return isFault ?
       this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
