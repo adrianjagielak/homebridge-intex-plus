@@ -34,10 +34,15 @@ export class SpaAccessory {
   private messageQueue: Map<string, { resolve: (value: Message) => void; reject: (reason?: Error) => void; timeout: NodeJS.Timeout }>;
   private isOnline = false;
   private deviceState?: DeviceState;
+  // Last temperature reading we consider usable. Cached across reconnects and, via
+  // accessory.context, across Homebridge restarts, so we can keep reporting a
+  // plausible CurrentTemperature while the spa unit is powered off.
+  private lastKnownCurrentTemperature?: number;
 
   private thermostatService: Service;
   private filterService: Service;
   private bubblesService: Service;
+  private batteryService: Service;
   private controllerService?: Service;
   private waterJetService?: Service;
   private sanitizerService?: Service;
@@ -48,6 +53,9 @@ export class SpaAccessory {
     private readonly host: string,
   ) {
     this.messageQueue = new Map();
+
+    // Restore the last usable temperature persisted from a previous run, if any.
+    this.lastKnownCurrentTemperature = this.accessory.context.lastKnownCurrentTemperature;
 
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Intex')
@@ -97,6 +105,15 @@ export class SpaAccessory {
     this.bubblesService.getCharacteristic(this.platform.Characteristic.On)
       .onGet(this.getBubblesOn.bind(this))
       .onSet(this.setBubblesOn.bind(this));
+
+    // A Battery service is the canonical, warning-free way to raise a generic alert
+    // on the accessory tile in the Home app. We repurpose its low-battery indicator
+    // to flag that the spa unit is powered off (no live temperature) while the
+    // controller itself is still reachable.
+    this.batteryService = this.accessory.getService(this.platform.Service.Battery) ||
+      this.accessory.addService(this.platform.Service.Battery);
+    this.batteryService.getCharacteristic(this.platform.Characteristic.StatusLowBattery)
+      .onGet(this.getStatusLowBattery.bind(this));
 
     if (this.platform.config.showUnusedSwitches) {
       this.controllerService = this.accessory.getServiceById(this.platform.Service.Switch, 'Controller') ||
@@ -288,6 +305,14 @@ export class SpaAccessory {
       temperatureUnit,
     };
 
+    // Cache the latest usable reading (and persist it across restarts) so we can keep
+    // reporting it once the spa unit powers off and stops sending a real value.
+    if (currentTemperature !== undefined && currentTemperature !== this.lastKnownCurrentTemperature) {
+      this.lastKnownCurrentTemperature = currentTemperature;
+      this.accessory.context.lastKnownCurrentTemperature = currentTemperature;
+      this.platform.api.updatePlatformAccessories([this.accessory]);
+    }
+
     // TODO
     // if (!previousIsOnline) {
     this.platform.log.debug('Initial spa state:', this.deviceState);
@@ -322,9 +347,18 @@ export class SpaAccessory {
         maxValue: this.deviceState.temperatureUnit === 'Celsius' ? 40 : 104,
         minStep: 1,
       });
-    if (this.deviceState.currentTemperature !== undefined) {
-      this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.deviceState.currentTemperature);
+    // Report the live reading when present, otherwise hold the last usable value so
+    // HomeKit never sees a missing required characteristic (which shows "No Response").
+    if (this.lastKnownCurrentTemperature !== undefined) {
+      this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.lastKnownCurrentTemperature);
     }
+    // Flag a powered-off spa unit (no live temperature) as a low-battery alert.
+    this.batteryService.updateCharacteristic(
+      this.platform.Characteristic.StatusLowBattery,
+      this.deviceState.currentTemperature === undefined ?
+        this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
+        this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
+    );
     this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetTemperature, this.deviceState.targetTemperature);
   }
 
@@ -391,15 +425,29 @@ export class SpaAccessory {
     if (!this.isOnline) {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
-    if (!this.deviceState || this.deviceState.currentTemperature === undefined) {
+
+    // Prefer the live reading; fall back to the last usable value (cached across
+    // restarts). Only when we have never seen a usable reading do we report the
+    // value as unavailable, preserving the previous behavior.
+    const value = this.deviceState?.currentTemperature ?? this.lastKnownCurrentTemperature;
+    if (value === undefined) {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.RESOURCE_BUSY);
     }
-
-    const value = this.deviceState.currentTemperature;
 
     this.platform.log.debug('Thermostat Get Characteristic CurrentTemperature ->', value);
 
     return value;
+  }
+
+  async getStatusLowBattery(): Promise<CharacteristicValue> {
+    // Never throw here: an error thrown from a characteristic getter is exactly what
+    // makes an accessory show as "No Response". Default to "normal" until a device
+    // state tells us the live temperature is unavailable (spa unit powered off).
+    const isFault = this.deviceState !== undefined && this.deviceState.currentTemperature === undefined;
+
+    return isFault ?
+      this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
+      this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
   }
 
   async setTargetTemperature(value: CharacteristicValue) {
