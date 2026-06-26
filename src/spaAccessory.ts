@@ -359,12 +359,15 @@ export class SpaAccessory {
     this.controllerService?.updateCharacteristic(this.platform.Characteristic.On, this.deviceState.isControllerOn);
     this.waterJetService?.updateCharacteristic(this.platform.Characteristic.On, this.deviceState.isWaterJetOn);
     this.sanitizerService?.updateCharacteristic(this.platform.Characteristic.On, this.deviceState.isSanitizerOn);
-    this.thermostatService.updateCharacteristic(
-      this.platform.Characteristic.CurrentHeatingCoolingState,
-      this.deviceState.isHeaterOn ?
-        this.platform.Characteristic.CurrentHeatingCoolingState.HEAT :
-        this.platform.Characteristic.CurrentHeatingCoolingState.OFF,
-    );
+    // Variant: while faulted, don't push a value here so the getter's thrown error stands.
+    if (this.deviceState.errorCode === undefined) {
+      this.thermostatService.updateCharacteristic(
+        this.platform.Characteristic.CurrentHeatingCoolingState,
+        this.deviceState.isHeaterOn ?
+          this.platform.Characteristic.CurrentHeatingCoolingState.HEAT :
+          this.platform.Characteristic.CurrentHeatingCoolingState.OFF,
+      );
+    }
     this.thermostatService.updateCharacteristic(
       this.platform.Characteristic.TargetHeatingCoolingState,
       this.deviceState.isHeaterOn ?
@@ -398,6 +401,12 @@ export class SpaAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
     if (!this.deviceState) {
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.RESOURCE_BUSY);
+    }
+
+    // Variant: surface the spa fault here (read-only CurrentHeatingCoolingState)
+    // instead of on CurrentTemperature, so the cached temperature still shows.
+    if (this.deviceState.errorCode !== undefined) {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.RESOURCE_BUSY);
     }
 
