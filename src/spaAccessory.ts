@@ -84,8 +84,9 @@ export class SpaAccessory {
     this.thermostatService = this.accessory.getService(this.platform.Service.Thermostat) ||
       this.accessory.addService(this.platform.Service.Thermostat);
     this.thermostatService.setCharacteristic(this.platform.Characteristic.Name, 'Intex PureSpa');
-    this.thermostatService.getCharacteristic(this.platform.Characteristic.CurrentHeatingCoolingState)
-      .onGet(this.getCurrentHeatingCoolingState.bind(this));
+    // Variant: deliberately NO onGet for CurrentHeatingCoolingState. It is driven
+    // purely by updateCharacteristic so we can push a HapStatusError while faulted —
+    // a pushed error is ignored by HAP if an onGet handler is registered.
     this.thermostatService.getCharacteristic(this.platform.Characteristic.TargetHeatingCoolingState)
       .onGet(this.getTargetHeatingCoolingState.bind(this))
       .onSet(this.setTargetHeatingCoolingState.bind(this))
@@ -359,12 +360,22 @@ export class SpaAccessory {
     this.controllerService?.updateCharacteristic(this.platform.Characteristic.On, this.deviceState.isControllerOn);
     this.waterJetService?.updateCharacteristic(this.platform.Characteristic.On, this.deviceState.isWaterJetOn);
     this.sanitizerService?.updateCharacteristic(this.platform.Characteristic.On, this.deviceState.isSanitizerOn);
-    this.thermostatService.updateCharacteristic(
-      this.platform.Characteristic.CurrentHeatingCoolingState,
-      this.deviceState.isHeaterOn ?
-        this.platform.Characteristic.CurrentHeatingCoolingState.HEAT :
-        this.platform.Characteristic.CurrentHeatingCoolingState.OFF,
-    );
+    // Variant: push a HapStatusError while faulted (works because this characteristic
+    // has no onGet handler), otherwise push the real heating state. updateCharacteristic
+    // has separate value/error overloads, so the two cases must be separate calls.
+    if (this.deviceState.errorCode !== undefined) {
+      this.thermostatService.updateCharacteristic(
+        this.platform.Characteristic.CurrentHeatingCoolingState,
+        new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.RESOURCE_BUSY),
+      );
+    } else {
+      this.thermostatService.updateCharacteristic(
+        this.platform.Characteristic.CurrentHeatingCoolingState,
+        this.deviceState.isHeaterOn ?
+          this.platform.Characteristic.CurrentHeatingCoolingState.HEAT :
+          this.platform.Characteristic.CurrentHeatingCoolingState.OFF,
+      );
+    }
     this.thermostatService.updateCharacteristic(
       this.platform.Characteristic.TargetHeatingCoolingState,
       this.deviceState.isHeaterOn ?
@@ -391,23 +402,6 @@ export class SpaAccessory {
       this.deviceState.currentTemperature ?? this.lastKnownCurrentTemperature ?? this.deviceState.targetTemperature,
     );
     this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetTemperature, this.deviceState.targetTemperature);
-  }
-
-  async getCurrentHeatingCoolingState(): Promise<CharacteristicValue> {
-    if (!this.isOnline) {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-    }
-    if (!this.deviceState) {
-      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.RESOURCE_BUSY);
-    }
-
-    const value = this.deviceState.isHeaterOn;
-
-    this.platform.log.debug('Thermostat Get Characteristic CurrentHeatingCoolingState ->', value);
-
-    return value ?
-      this.platform.Characteristic.CurrentHeatingCoolingState.HEAT :
-      this.platform.Characteristic.CurrentHeatingCoolingState.OFF;
   }
 
   async setTargetHeatingCoolingState(value: CharacteristicValue) {
