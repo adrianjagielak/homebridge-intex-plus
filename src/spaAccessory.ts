@@ -383,17 +383,12 @@ export class SpaAccessory {
         maxValue: this.deviceState.temperatureUnit === 'Celsius' ? 40 : 104,
         minStep: 1,
       });
-    // Report the live reading when present, otherwise hold the last usable value so
-    // HomeKit never sees a missing required characteristic (which shows "No Response").
-    if (this.lastKnownCurrentTemperature !== undefined) {
-      this.thermostatService.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, this.lastKnownCurrentTemperature);
-    }
-    // Flag an active spa fault (an error code on the LED panel) as a low-battery alert.
-    this.batteryService.updateCharacteristic(
-      this.platform.Characteristic.StatusLowBattery,
-      this.deviceState.errorCode !== undefined ?
-        this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
-        this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
+    // Experiment scaffolding: always populate CurrentTemperature so the tile stays
+    // usable — prefer the live reading, then the cached value, then the target
+    // temperature as a placeholder. The fault is surfaced by the variant below, not here.
+    this.thermostatService.updateCharacteristic(
+      this.platform.Characteristic.CurrentTemperature,
+      this.deviceState.currentTemperature ?? this.lastKnownCurrentTemperature ?? this.deviceState.targetTemperature,
     );
     this.thermostatService.updateCharacteristic(this.platform.Characteristic.TargetTemperature, this.deviceState.targetTemperature);
   }
@@ -462,10 +457,11 @@ export class SpaAccessory {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
     }
 
-    // Prefer the live reading; fall back to the last usable value (cached across
-    // restarts). Only when we have never seen a usable reading do we report the
-    // value as unavailable, preserving the previous behavior.
-    const value = this.deviceState?.currentTemperature ?? this.lastKnownCurrentTemperature;
+    // Experiment scaffolding: never surface the fault through CurrentTemperature.
+    // Always return a value (live, then cached, then the target as a placeholder)
+    // so the tile keeps showing a temperature and the only error comes from the
+    // variant's chosen characteristic.
+    const value = this.deviceState?.currentTemperature ?? this.lastKnownCurrentTemperature ?? this.deviceState?.targetTemperature;
     if (value === undefined) {
       throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.RESOURCE_BUSY);
     }
@@ -476,14 +472,9 @@ export class SpaAccessory {
   }
 
   async getStatusLowBattery(): Promise<CharacteristicValue> {
-    // Never throw here: an error thrown from a characteristic getter is exactly what
-    // makes an accessory show as "No Response". Default to "normal" until a device
-    // state tells us the spa is reporting a fault (an error code on its LED panel).
-    const isFault = this.deviceState?.errorCode !== undefined;
-
-    return isFault ?
-      this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
-      this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+    // Experiment scaffolding: battery warning silenced so the only signal the user
+    // sees is the variant's HAP error, not a "low battery" badge.
+    return this.platform.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
   }
 
   async setTargetTemperature(value: CharacteristicValue) {
