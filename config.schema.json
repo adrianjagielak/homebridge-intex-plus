@@ -21,6 +21,13 @@
         "title": "Show unused switches",
         "type": "boolean",
         "default": false
+      },
+      "temperatureRefreshInterval": {
+        "title": "Temperature refresh interval (minutes)",
+        "description": "The spa controller only re-samples the water temperature when its state changes, so the reported temperature can stay unchanged for hours. Every this many minutes the plugin briefly cycles whatever is already running (the heater if it is on, otherwise the filter) to make the controller publish a fresh reading. Set to 0 to disable.",
+        "type": "integer",
+        "default": 15,
+        "minimum": 0
       }
     }
   }
